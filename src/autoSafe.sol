@@ -4,11 +4,11 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/KeeperCompatibleInterface.sol";
-import "@pythnetwork/pyth-sdk-solidity/IPyth.sol";
-import "@pythnetwork/pyth-sdk-solidity/PythStructs.sol";
+import "@chainlink/lib/chainlink-brownie-contracts/contracts/src/v0.8/KeeperCompatible.sol";
+import "@pythnetwork/IPyth.sol";
+import "@pythnetwork/PythStructs.sol";
 
-contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
+contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatible {
     struct TokenBalance {
         uint256 celoBalance;
         uint256 cUsdBalance;
@@ -19,7 +19,7 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
     mapping(address => TokenBalance) public balances;
     mapping(address => address) public upliners;
     mapping(address => address[]) public downliners;
-    uint256 public lockDuration = 1 weeks;
+    uint256 public lockDuration = 1 minutes; //for testing purpose i so i can withdraw in same video demo, otherwise sshouuld be longer
     address public constant CELO_TOKEN_ADDRESS = address(0);
     address public constant CUSD_TOKEN_ADDRESS =
         0x874069fa1eb16d44d622f2e0ca25eea172369bc1; // 0x765DE816845861e75A25fCA122bb6898B8B1282a
@@ -32,7 +32,7 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
         _mint(address(this), 21000000 * 1e18);
         interval = 1 minutes;
         lastTimeStamp = block.timestamp;
-        address contractAddress = 0x874069fa1eb16d44d622f2e0ca25eea172369bc1;
+        address contractAddress = 0x74f09cb3c7e2A01865f424FD14F6dc9A14E3e94E; // mainnet 0xff1a0f4744e8582DF1aE09D5611b887B6a12925C
         IPyth pyth = IPyth(contractAddress);
     }
 
@@ -55,7 +55,7 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
     );
 
     receive() external payable {
-        deposit(CELO_TOKEN_ADDRESS, msg.value);
+        depositCELO(CELO_TOKEN_ADDRESS, msg.value);
     }
 
     function setUpliner(address upliner) public {
@@ -77,7 +77,6 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
     }
 
     function depositCUSD(uint256 amount) public nonReentrant {
-        if (tokenAddress == CUSD_TOKEN_ADDRESS) {
             IERC20 cUsdToken = IERC20(CUSD_TOKEN_ADDRESS);
             require(
                 cUsdToken.transferFrom(msg.sender, address(this), amount),
@@ -87,8 +86,6 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
             cUsdBalance.cUsdBalance += amount;
             cUsdBalance.depositTime = block.timestamp;
             emit Deposited(msg.sender, amount, CUSD_TOKEN_ADDRESS);
-        } else {
-            revert("Unsupported token");
         }
         _mint(msg.sender, 1);
         TokenBalance storage tokenIncentive = balances[msg.sender];
@@ -97,19 +94,25 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
         distributeReferralReward(msg.sender, 1);
     }
 
+
+    function getPriceChange(
+        bytes[] calldata priceUpdateData
+    ) public payable returns (PythStructs.Price memory) {
+        uint fee = pyth.getUpdateFee(priceUpdateData);
+        pyth.updatePriceFeeds{value: fee}(priceUpdateData);
+
+        bytes32 priceId = 0x7d669ddcdd23d9ef1fa9a9cc022ba055ec900e91c4cb960f3c20429d4447a411;
+        uint256 age = 24 * 60 * 60;
+        uint8 limit = -1;
+        PythStructs.Price memory oldBasePrice = pyth.getPriceNoOlderThan(
+            priceId,
+            age
+        );
+        PythStructs.Price memory currentBasePrice = pyth.getPrice(priceId);
+        uint8 change = ((oldBasePrice - currentBasePrice) * 100) / oldBasePrice;
+    }
     function depositCELO(uint256 amount) public payable nonReentrant {
-        if (tokenAddress == CELO_TOKEN_ADDRESS) {
             //only deposit native asset if price in  change is <=-1% in the specified interval
-            bytes32 priceId = 0x7d669ddcdd23d9ef1fa9a9cc022ba055ec900e91c4cb960f3c20429d4447a411;
-            uint256 age = 24 * 60 * 60;
-            uint8 limit = -1;
-            PythStructs.Price memory oldBasePrice = pyth.getPriceNoOlderThan(
-                priceId,
-                age
-            );
-            PythStructs.Price memory currentBasePrice = pyth.getPrice(priceId);
-            uint8 change = ((oldBasePrice - currentBasePrice) * 100) /
-                oldBasePrice;
             if (change <= -1) {
                 require(
                     amount > 0,
@@ -123,9 +126,6 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatibleInterface {
             } else {
                 return;
             }
-        } else {
-            revert("Unsupported token");
-        }
         _mint(msg.sender, 1);
         TokenBalance storage tokenIncentive = balances[msg.sender];
         tokenIncentive.tokenIncentive += 1;

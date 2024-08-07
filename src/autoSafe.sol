@@ -86,7 +86,7 @@ contract AutoSafe is ERC20, ReentrancyGuard, KeeperCompatible {
             cUsdBalance.cUsdBalance += amount;
             cUsdBalance.depositTime = block.timestamp;
             emit Deposited(msg.sender, amount, CUSD_TOKEN_ADDRESS);
-        }
+
         _mint(msg.sender, 1);
         TokenBalance storage tokenIncentive = balances[msg.sender];
         tokenIncentive.tokenIncentive += 1;

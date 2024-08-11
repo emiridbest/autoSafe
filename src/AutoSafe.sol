@@ -4,11 +4,11 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@chainlink/lib/chainlink-brownie-contracts/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import "@chainlink/lib/chainlink-brownie-contracts/contracts/src/v0.8/AutomationCompatible.sol";
 import "@pythnetwork/IPyth.sol";
 import "@pythnetwork/PythStructs.sol";
 
- contract AutoSafe is ERC20, ReentrancyGuard, AutomationCompatibleInterface {
+contract AutoSafe is ERC20, ReentrancyGuard {
     struct TokenBalance {
         uint256 celoBalance;
         uint256 cUsdBalance;
@@ -22,20 +22,20 @@ import "@pythnetwork/PythStructs.sol";
     uint256 public lockDuration = 1 minutes; // for testing
     address public constant CELO_TOKEN_ADDRESS = address(0);
     address public constant CUSD_TOKEN_ADDRESS =
-        0x765DE816845861e75A25fCA122bb6898B8B1282a; // 0x765DE816845861e75A25fCA122bb6898B8B1282a
+        0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1; // 0x765DE816845861e75A25fCA122bb6898B8B1282a
     bool public due = false;
 
     uint256 public interval;
     uint256 public lastTimeStamp;
 
     IPyth public pyth;
-  bytes32 celoPriceId;
-    constructor(address _pyth, bytes32 _celoPriceId) ERC20("miniSafeToken", "MST") {
+    bytes32 celoPriceId;
+    constructor() ERC20("autoSafeToken", "AST") {
         _mint(address(this), 21000000 * 1e18);
         interval = 1 minutes;
         lastTimeStamp = block.timestamp;
-        pyth = IPyth(_pyth); //(0x74f09cb3c7e2A01865f424FD14F6dc9A14E3e94E); // mainnet 0xff1a0f4744e8582DF1aE09D5611b887B6a12925C
-        celoPriceId = _celoPriceId; //0x7d669ddcdd23d9ef1fa9a9cc022ba055ec900e91c4cb960f3c20429d4447a411;
+        pyth = IPyth(0x74f09cb3c7e2A01865f424FD14F6dc9A14E3e94E); //(0x74f09cb3c7e2A01865f424FD14F6dc9A14E3e94E); // mainnet 0xff1a0f4744e8582DF1aE09D5611b887B6a12925C
+        celoPriceId = 0x7d669ddcdd23d9ef1fa9a9cc022ba055ec900e91c4cb960f3c20429d4447a411; //0x7d669ddcdd23d9ef1fa9a9cc022ba055ec900e91c4cb960f3c20429d4447a411;
     }
 
     event Deposited(
@@ -77,9 +77,12 @@ import "@pythnetwork/PythStructs.sol";
     ) public view returns (address[] memory) {
         return downliners[upliner];
     }
-        function depositCUSD(uint256 amount) public nonReentrant {
+    function depositCUSD(uint256 amount) public nonReentrant {
         IERC20 cUsdToken = IERC20(CUSD_TOKEN_ADDRESS);
-        require(cUsdToken.transferFrom(msg.sender, address(this), amount), "Transfer failed.");
+        require(
+            cUsdToken.transferFrom(msg.sender, address(this), amount),
+            "Transfer failed."
+        );
         TokenBalance storage cUsdBalance = balances[msg.sender];
         cUsdBalance.cUsdBalance += amount;
         cUsdBalance.depositTime = block.timestamp;
@@ -93,7 +96,6 @@ import "@pythnetwork/PythStructs.sol";
     }
 
 
-    /**
       function deposit(address tokenAddress, uint256 amount) public nonReentrant payable {
         if (tokenAddress == CELO_TOKEN_ADDRESS) {
         int256 priceChange = getPriceChange();
@@ -136,9 +138,24 @@ import "@pythnetwork/PythStructs.sol";
         int256 change = int256(currentBasePrice.price) - int256(oldBasePrice.price);
         uint256 percentageChange = (uint256(change) * 100) / uint256(oldBasePrice.price);
 
-        return currentBasePrice;
+        return percentageChange;
     }
-    */
+
+    function updatePriceAndDeposit(bytes[] calldata pythPriceUpdate) public payable {
+        uint fee = pyth.getUpdateFee(priceUpdateData);
+        pyth.updatePriceFeeds{value: fee}(priceUpdateData);
+
+        bytes32 priceId = 0x7d669ddcdd23d9ef1fa9a9cc022ba055ec900e91c4cb960f3c20429d4447a411;
+        uint256 age = 24 * 60 * 60;
+        PythStructs.Price memory oldBasePrice = pyth.getPriceNoOlderThan(priceId, age);
+        PythStructs.Price memory currentBasePrice = pyth.getPrice(priceId);
+        int256 change = int256(currentBasePrice.price) - int256(oldBasePrice.price);
+        uint256 percentageChange = (uint256(change) * 100) / uint256(oldBasePrice.price);
+        if(percentageChange <= -1) {
+        depositCELO();
+        }
+    }
+/**
     function getPriceChange() public view returns (int256) {
         uint256 age = 24 * 60 * 60;
         PythStructs.Price memory oldBasePrice = pyth.getPriceNoOlderThan(
@@ -153,17 +170,14 @@ import "@pythnetwork/PythStructs.sol";
 
         return percentageChange;
     }
-
-    function depositCELO(uint256 amount) public payable nonReentrant {
-        int256 priceChange = getPriceChange();
-        if (priceChange <= -1) {
-            require(amount > 0, "CELO deposit amount must be greater than 0");
+*/
+    function depositCELO(
+    ) public payable nonReentrant {
             TokenBalance storage celoBalance = balances[msg.sender];
-            celoBalance.celoBalance += amount;
+            celoBalance.celoBalance += 1 * 1e18;
             celoBalance.depositTime = block.timestamp;
             celoBalance.tokenIncentive = balanceOf(msg.sender);
-            emit Deposited(msg.sender, amount, CELO_TOKEN_ADDRESS);
-        }
+            emit Deposited(msg.sender, 1, CELO_TOKEN_ADDRESS);
         _mint(msg.sender, 1);
         TokenBalance storage tokenIncentive = balances[msg.sender];
         tokenIncentive.tokenIncentive += 1;
@@ -222,8 +236,8 @@ import "@pythnetwork/PythStructs.sol";
             } else {
                 revert("Unsupported token");
             }
-
-            transferFrom(msg.sender, address(0), tokenIncentive);
+            approve(msg.sender, tokenIncentive);
+            transferFrom(msg.sender, address(this), tokenIncentive);
             emit TimelockBroken(msg.sender, 1);
         }
     }
@@ -276,14 +290,14 @@ import "@pythnetwork/PythStructs.sol";
         upkeepNeeded = (block.timestamp - lastTimeStamp) > interval;
     }
 
-    function performUpkeep(address tokenAddress, uint256 amount) external {
+    function performUpkeep(address tokenAddress, uint256 amount, bytes[] calldata pythPriceUpdate) external {
         if ((block.timestamp - lastTimeStamp) > interval) {
             lastTimeStamp = block.timestamp;
             if (tokenAddress == CUSD_TOKEN_ADDRESS) {
                 depositCUSD(amount);
             }
             if (tokenAddress == CELO_TOKEN_ADDRESS) {
-                depositCELO(amount);
+                updatePriceAndDeposit(amount, pythPriceUpdate);
             }
         }
     }
